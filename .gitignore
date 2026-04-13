@@ -1,0 +1,20 @@
+# Secrets
+src/secrets.js
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+env/
+venv/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Media (Optional - ignore large files if needed)
+# my_wallpaper.mp4
+
+# Logs
+*.log
