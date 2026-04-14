@@ -21,9 +21,15 @@ const MOOD_KEYWORDS = {
 // Offline mini-AFINN fallback deployed for extreme redundancy handling without CDN failure states.
 const OFFLINE_AFINN = {
     happy: 3, joy: 3, amazing: 4, good: 2, wonderful: 4, fantastic: 4, awesome: 4, setup: 1, yes: 1, 
+    smile: 2, laugh: 3, love: 3, excited: 3, cheerful: 2, glad: 2,
     sad: -2, depressed: -3, cry: -2, upset: -2, lonely: -2, heartbreak: -3, miss: -1, bad: -3,
-    peace: 2, relax: 2, chill: 1, quiet: 1, rest: 2,
-    stress: -3, anxious: -3, panic: -4, worry: -2, angry: -3, mad: -3, hate: -3, tired: -2
+    terrible: -3, awful: -3, tragedy: -3, sorrow: -2, tragic: -3, fail: -2,
+    peace: 2, relax: 2, chill: 1, quiet: 1, rest: 2, calm: 2, breathe: 1, easy: 1,
+    focus: 2, study: 1, work: 1, productive: 2, concentrate: 2,
+    energy: 2, pump: 2, hype: 2, gym: 1, run: 1, workout: 1, fired: 2,
+    stress: -3, anxious: -3, panic: -4, worry: -2, nervous: -2, overwhelmed: -3, pressure: -2,
+    angry: -3, mad: -3, hate: -3, furious: -3, annoyed: -2, frustrated: -2, rage: -4,
+    tired: -2, sleepy: -2, exhausted: -3, drained: -2, bored: -1, lazy: -1
 };
 
 let activeAfinn = OFFLINE_AFINN;

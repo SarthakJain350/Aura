@@ -667,28 +667,7 @@ function setActiveMood(mood) { setMood(mood); }
                             window.SpeechService.start();
                         }}
                     >
-                        {spotifyReady ? (
-                            <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-                                <button 
-                                    onClick={() => window.SpotifyService.pause()}
-                                    style={{ cursor: 'pointer', background: 'rgba(255,255,255,0.08)', color: '#fff', padding: '8px 20px', border: '1px solid rgba(255,255,255,0.3)', borderRadius: 24, fontSize: 14, transition: 'all 0.2s', backdropFilter: 'blur(8px)' }}
-                                    onMouseEnter={e => e.target.style.background='rgba(255,255,255,0.18)'}
-                                    onMouseLeave={e => e.target.style.background='rgba(255,255,255,0.08)'}
-                                >⏸ Pause</button>
-                                <button 
-                                    onClick={() => window.SpotifyService.resume()}
-                                    style={{ cursor: 'pointer', background: '#1db954', color: '#fff', padding: '8px 20px', border: 'none', borderRadius: 24, fontWeight: 'bold', fontSize: 14, transition: 'all 0.2s', boxShadow: '0 0 15px rgba(29,185,84,0.4)' }}
-                                    onMouseEnter={e => e.target.style.boxShadow='0 0 25px rgba(29,185,84,0.7)'}
-                                    onMouseLeave={e => e.target.style.boxShadow='0 0 15px rgba(29,185,84,0.4)'}
-                                >▶ Play</button>
-                                <button 
-                                    onClick={handleSkip}
-                                    style={{ cursor: 'pointer', background: 'rgba(255,255,255,0.08)', color: '#fff', padding: '8px 20px', border: '1px solid rgba(255,255,255,0.3)', borderRadius: 24, fontSize: 14, transition: 'all 0.2s', backdropFilter: 'blur(8px)' }}
-                                    onMouseEnter={e => e.target.style.background='rgba(255,255,255,0.18)'}
-                                    onMouseLeave={e => e.target.style.background='rgba(255,255,255,0.08)'}
-                                >⏭ Skip</button>
-                            </div>
-                        ) : null}
+                        {/* Redundant playback controls removed in favor of pinned AuraUI controls */}
                     </window.AuraUI>
                     </ErrorBoundary>
                 )}

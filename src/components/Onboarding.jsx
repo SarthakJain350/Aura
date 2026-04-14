@@ -141,7 +141,7 @@ const Onboarding = ({ onComplete, onReturningComplete, spotifyUser, onSpotifyLog
                         ) : (
                             <React.Fragment>
                                 <button className="btn-primary" onClick={handleContinueExistingUser}>
-                                    Initialize as {spotifyUser.display_name}
+                                    Wake AURA ({spotifyUser.display_name})
                                 </button>
                                 <div className="links-container">
                                     <a href="#" onClick={(e) => { e.preventDefault(); onSpotifyLogout(); }}>Sign in with a different account</a>

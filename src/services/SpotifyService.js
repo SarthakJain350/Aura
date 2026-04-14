@@ -131,10 +131,17 @@ window.SpotifyService = {
         if (!uris || uris.length === 0) return;
 
         const token = localStorage.getItem('spotify_access_token');
-        await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${this.deviceId}`, {
-            method: 'PUT', body: JSON.stringify({ uris: uris }),
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
-        });
+        try {
+            await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${this.deviceId}`, {
+                method: 'PUT', body: JSON.stringify({ uris: uris }),
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+            });
+        } catch (e) {
+            console.error('[SPOTIFY] ❌ playMood failed:', e);
+            if (e.name === 'NotAllowedError' || String(e).includes('play() failed')) {
+                if (window.setStatusText) window.setStatusText('Click anywhere to start music');
+            }
+        }
     },
 
     nextSong: async function() {
@@ -152,7 +159,14 @@ window.SpotifyService = {
         });
     },
     pause: function() { if (this.player) this.player.pause(); },
-    resume: function() { if (this.player) this.player.resume(); },
+    resume: function() { 
+        if (this.player) {
+            this.player.resume().catch(e => {
+                console.error('[SPOTIFY] ❌ player.resume() failed:', e);
+                if (window.setStatusText) window.setStatusText('Click anywhere to start music');
+            }); 
+        }
+    },
     getPosition: async function() {
         if (!this.player) return 0;
         const state = await this.player.getCurrentState();

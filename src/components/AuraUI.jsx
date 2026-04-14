@@ -77,11 +77,15 @@ const AuraUI = ({
     // and explicit ID/class guards prevent the buttons from triggering a close.
     useEffect(() => {
         const handleClickOutside = (e) => {
+            // These guards prevent the outside click handler from firing when clicking the buttons
             if (e.target.closest('#aura-settings-btn') || e.target.closest('#aura-profile-btn')) return;
+            // These guards prevent the handler from firing when clicking inside the cards
             if (e.target.closest('.settings-card') || e.target.closest('.profile-card')) return;
+            
             setShowSettings(false);
             setShowProfile(false);
         };
+        // Use mousedown to catch the start of the click before it propagates fully
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);

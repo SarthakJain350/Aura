@@ -18,6 +18,21 @@ window.SpeechService = {
   // Stability Trackers
   _restartCount: 0,
   _lastRestartTime: 0,
+  _lastStartedTime: Date.now(),
+  
+  hardwareReset: function() {
+    console.log('[SPEECH] 🔄 Performing HARDWARE RESET on Web Speech API...')
+    if (this.recognition) {
+        try { this.recognition.abort(); } catch(e) {}
+        this.recognition = null;
+    }
+    this.isListening = false;
+    window.micStatus = 'failed';
+    if (window.setMicStatus) window.setMicStatus('failed');
+    if (!this.manuallyStopped) {
+        setTimeout(() => this.start(), 1000);
+    }
+  },
 
   init: function() {
     console.log('[SPEECH] init() called')
@@ -39,6 +54,7 @@ window.SpeechService = {
       clearTimeout(this.connectingTimeout);
       console.log('[SPEECH] ✅ MICROPHONE IS NOW ACTIVE')
       this.isListening = true
+      this._lastStartedTime = Date.now()
       window.micStatus = 'listening'
       if (window.setMicActive) window.setMicActive(true)
       if (window.setMicStatus) window.setMicStatus('listening')
@@ -122,12 +138,7 @@ window.SpeechService = {
     this.connectingTimeout = setTimeout(() => {
         if (!this.isListening) {
             console.warn('[SPEECH] ⚠️ Connecting timeout — recognition never fired onstart')
-            console.warn('[SPEECH] ❌ Forcing hardware reset and restart')
-            this.recognition = null
-            this.isListening = false
-            window.micStatus = 'failed'
-            if (window.setMicStatus) window.setMicStatus('failed')
-            this.start()
+            this.hardwareReset()
         }
     }, 5000)
 
@@ -162,6 +173,12 @@ setInterval(() => {
     if (!window.SpeechService.isListening && !window.SpeechService.manuallyStopped && window.micStatus !== 'reconnecting') {
         console.warn('[SPEECH] ⚠️ Health check: Inactive. Restarting...')
         window.SpeechService.start()
+    }
+    
+    // Hard reset every 15 minutes to prevent Chrome Web Speech API stalling
+    if (window.SpeechService.isListening && (Date.now() - window.SpeechService._lastStartedTime > 900000)) {
+        console.log('[SPEECH] ⏱️ 15-minute stability reset triggered.')
+        window.SpeechService.hardwareReset()
     }
 }, 15000)
 
