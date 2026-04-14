@@ -10,7 +10,7 @@ A 4-phase plan to stabilize the voice pipeline, train local ML models, and polis
 - [x] Define requirements
 - [x] Establish roadmap
 
-### [ ] Phase 1: Stability Fixes
+### [x] Phase 1: Stability Fixes
 Fixing the core pipeline and UI bugs identified in CONCERNS.md.
 - **Goals**: Resolve voice pipeline restarts, fix settings buttons, implement autostart.
 - **Outcome**: A "rock-solid" foundation for future features.
