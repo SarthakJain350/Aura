@@ -4,7 +4,8 @@ const AuraUI = ({
     children, micActive = false, orbSpeaking = false, statusText = '', logs = [], mood = 'calm', setMood, listeningMode = 'passive', interimText = '', 
     isPlaying = false, language = 'English', onChangeLanguage, onLogout, lyricsText = '', lyricsLoading = false, 
     currentPosMs = 0, trackDuration = 1000, activeGenre = 'pop', onChangeGenre, toastMsg = '', pendingConfirmation = null, onConfirmMood, 
-    wakeTimeRemaining = null, trackInfo = {name: '', artist: ''}, profile = {onboarded: true}, onOrbClick, geminiStatus = 'checking', micStatus = 'failed'
+    wakeTimeRemaining = null, trackInfo = {name: '', artist: ''}, profile = {onboarded: true}, onOrbClick, geminiStatus = 'checking', micStatus = 'failed',
+    isMicMuted = false, setIsMicMuted, isDND = false, setIsDND, notification = null, setNotification, handleTextSubmitDirect
 }) => {
     const isChromeEdge = /Chrome/.test(navigator.userAgent) || /Edg/.test(navigator.userAgent);
     const isPassive = listeningMode === 'passive';
@@ -12,7 +13,7 @@ const AuraUI = ({
     const [cursorPos, setCursorPos] = useState({ x: -100, y: -100 });
     const [parallax, setParallax] = useState({ x: 0, y: 0 });
     const [micTestActive, setMicTestActive] = useState(false);
-    const [dismissMusicTip, setDismissMusicTip] = useState(false);
+    const [dismissMusicTip, setDismissMusicTip] = useState(localStorage.getItem('aura_music_tip') === 'true');
     
     // Sidebar (lyrics) state — auto-hide
     const [sidebarVisible, setSidebarVisible] = useState(false);
@@ -237,7 +238,11 @@ const AuraUI = ({
     const handleTextSubmit = () => {
         const trimmed = textInput.trim();
         if (!trimmed) return;
-        if (window.handleSpeechResult) {
+        if (handleTextSubmitDirect) {
+            handleTextSubmitDirect(trimmed);
+        } else if (window.handleDirectCommand) {
+            window.handleDirectCommand(trimmed);
+        } else if (window.handleSpeechResult) {
             window.handleSpeechResult(trimmed, 1.0);
         }
         setTextInput('');
@@ -281,18 +286,39 @@ const AuraUI = ({
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.4)', padding: '5px 12px', borderRadius: 20 }}>
                     <div className={`mic-dot ${micStatus}`} style={{ 
                         width: 10, height: 10, borderRadius: '50%', 
-                        background: micStatus === 'listening' ? '#10b981' : (micStatus === 'reconnecting' ? '#f59e0b' : '#ef4444'),
-                        boxShadow: `0 0 8px ${micStatus === 'listening' ? '#10b981' : (micStatus === 'reconnecting' ? '#f59e0b' : '#ef4444')}`
+                        background: isMicMuted ? '#ef4444' : (micStatus === 'listening' ? '#10b981' : (micStatus === 'reconnecting' ? '#f59e0b' : '#ef4444')),
+                        boxShadow: `0 0 8px ${isMicMuted ? '#ef4444' : (micStatus === 'listening' ? '#10b981' : (micStatus === 'reconnecting' ? '#f59e0b' : '#ef4444'))}`
                     }}></div>
                     <span style={{ fontSize: 12, color: '#fff', opacity: 0.8 }}>
-                        {micStatus === 'listening' ? 'Mic Active' : (micStatus === 'reconnecting' ? 'Reconnecting...' : 'Mic Off')}
+                        {isMicMuted ? 'Mic Muted' : (micStatus === 'listening' ? 'Mic Active' : (micStatus === 'reconnecting' ? 'Reconnecting...' : 'Mic Off'))}
                     </span>
                 </div>
+                {isDND && (
+                    <div style={{ display: 'flex', alignItems: 'center', background: 'rgba(0,0,0,0.4)', padding: '5px 12px', borderRadius: 20 }} title="Do Not Disturb">
+                        <span style={{ fontSize: 14 }}>🌙</span>
+                    </div>
+                )}
 
                 {/* Spacer */}
                 <div style={{ flex: 1 }} />
 
                 {/* ── Circle buttons top-right ── */}
+                <button
+                    className="circle-btn"
+                    title={isMicMuted ? "Unmute Mic" : "Mute Mic"}
+                    onClick={e => { e.stopPropagation(); setIsMicMuted(!isMicMuted); }}
+                    style={{ background: isMicMuted ? '#ef444433' : 'rgba(0,0,0,0.6)', borderColor: isMicMuted ? '#ef4444' : 'rgba(34, 211, 238, 0.4)', color: isMicMuted ? '#ef4444' : '#22d3ee' }}
+                >
+                    {isMicMuted ? '🔇' : '🎙️'}
+                </button>
+                <button
+                    className="circle-btn"
+                    title={isDND ? "Disable DND" : "Enable DND"}
+                    onClick={e => { e.stopPropagation(); setIsDND(!isDND); }}
+                    style={{ background: isDND ? '#f59e0b33' : 'rgba(0,0,0,0.6)', borderColor: isDND ? '#f59e0b' : 'rgba(34, 211, 238, 0.4)', color: isDND ? '#f59e0b' : '#22d3ee' }}
+                >
+                    {isDND ? '🌙' : '🔔'}
+                </button>
                 <button
                     id="aura-settings-btn"
                     className="circle-btn settings-btn"
@@ -317,7 +343,19 @@ const AuraUI = ({
                 >👤</button>
             </div>
 
-            {/* ── Toasts / Confirmations ── */}
+            {/* ── Toasts / Confirmations / Notifications ── */}
+            {notification && (
+                <div className="glass-panel aura-notification" style={{ position: 'absolute', top: 20, right: 20, padding: '20px', zIndex: 10000, maxWidth: 350, border: `1px solid ${activeMood.color}`, boxShadow: `0 10px 30px ${activeMood.color}33`, animation: 'slide-in-right 0.3s forwards', backgroundColor: 'rgba(5,5,15,0.95)' }}>
+                    <p style={{ margin: '0 0 15px 0', fontSize: 14, color: '#fff', fontWeight: 'bold' }}>{notification.message}</p>
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                        {notification.onAction && (
+                            <button onClick={() => { notification.onAction(); setNotification(null); }} style={{ background: activeMood.color, color: '#000', border: 'none', padding: '6px 15px', borderRadius: 15, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}>{notification.actionText}</button>
+                        )}
+                        <button onClick={() => setNotification(null)} style={{ background: 'transparent', color: '#9ca3af', border: '1px solid #9ca3af', padding: '6px 15px', borderRadius: 15, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}>Dismiss</button>
+                    </div>
+                </div>
+            )}
+            
             {toastMsg && (
                 <div style={{ position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)', backgroundColor: '#fff', color: '#000', padding: '10px 30px', borderRadius: 25, zIndex: 200, fontWeight: 'bold', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>{toastMsg}</div>
             )}
@@ -335,7 +373,7 @@ const AuraUI = ({
             {hasPlayedMusic && !dismissMusicTip && (
                 <div style={{ position: 'absolute', top: 70, left: '50%', transform: 'translateX(-50%)', background: 'rgba(29, 185, 84, 0.9)', color: '#fff', padding: '10px 20px', borderRadius: 10, zIndex: 200, display: 'flex', alignItems: 'center', gap: 15, boxShadow: '0 5px 15px rgba(0,0,0,0.5)' }}>
                     <span style={{ fontSize: 14, fontWeight: 'bold' }}>Tip: Use headphones so AURA does not pick up music through your microphone.</span>
-                    <button onClick={() => setDismissMusicTip(true)} style={{ background: 'transparent', border: '1px solid currentColor', color: 'currentColor', padding: '4px 10px', borderRadius: 4, cursor: 'pointer' }}>Dismiss</button>
+                    <button onClick={() => { setDismissMusicTip(true); localStorage.setItem('aura_music_tip', 'true'); }} style={{ background: 'transparent', border: '1px solid currentColor', color: 'currentColor', padding: '4px 10px', borderRadius: 4, cursor: 'pointer' }}>Dismiss</button>
                 </div>
             )}
 
@@ -527,6 +565,19 @@ const AuraUI = ({
                 <div style={{ textAlign: 'center' }}>
                     <h2 style={{ color: activeMood.color, fontSize: '22px', transition: 'color 0.5s ease', margin: 0, textShadow: `0 0 20px ${activeMood.color}`, fontFamily: 'JetBrains Mono, monospace' }}>{statusText}</h2>
                     {interimText && <p style={{ margin: '8px 0 0', color: '#e5e7eb', fontStyle: 'italic', fontSize: 16 }}>{interimText}...</p>}
+                </div>
+
+                {/* ── Dynamic Audio Visualizer ── */}
+                <div style={{ display: 'flex', gap: '4px', height: '40px', alignItems: 'center', justifyContent: 'center', opacity: (waveState === 'speaking' || waveState === 'listening') ? 1 : 0, transition: 'opacity 0.3s ease' }}>
+                    {[...Array(7)].map((_, i) => (
+                        <div key={i} className={`wave-bar ${waveState}`} style={{
+                            width: '6px',
+                            background: activeMood.color,
+                            borderRadius: '3px',
+                            animationDelay: `${i * 0.15}s`,
+                            boxShadow: `0 0 10px ${activeMood.color}88`
+                        }}></div>
+                    ))}
                 </div>
 
                 {/* Track Name + Artist */}
@@ -783,19 +834,23 @@ const AuraUI = ({
                     border: 1px solid rgba(34, 211, 238, 0.4);
                     color: #22d3ee;
                     font-size: 18px;
-                    cursor: pointer;
                     display: flex;
                     align-items: center;
                     justify-content: center;
-                    transition: all 0.2s ease;
+                    cursor: pointer;
+                    transition: all 0.2s;
                     backdrop-filter: blur(10px);
-                    flex-shrink: 0;
                 }
                 .circle-btn:hover {
-                    border-color: #22d3ee;
+                    background: rgba(34, 211, 238, 0.2) !important;
                     box-shadow: 0 0 15px rgba(34, 211, 238, 0.4);
-                    transform: scale(1.1);
                 }
+
+                @keyframes slide-in-right {
+                    from { transform: translateX(120%); opacity: 0; }
+                    to { transform: translateX(0); opacity: 1; }
+                }
+
 
                 /* Floating cards scrollbar */
                 .aura-floating-card::-webkit-scrollbar { width: 4px; }
@@ -804,9 +859,15 @@ const AuraUI = ({
                 /* Animations */
                 @keyframes spin { 100% { transform: rotate(360deg); } }
                 @keyframes spin-rev { 100% { transform: rotate(-360deg); } }
-                @keyframes core-pulse { 100% { transform: scale(1.05); } }
-                @keyframes ripple-expand { 0% { width: 100px; height: 100px; opacity: 1; } 100% { width: 350px; height: 350px; opacity: 0; border-width: 1px; } }
+                @keyframes rip-expand { 0% { width: 100px; height: 100px; opacity: 1; } 100% { width: 350px; height: 350px; opacity: 0; border-width: 1px; } }
                 @keyframes mic-pulse { 0% { transform: scale(1); box-shadow: 0 0 5px #10b981; } 50% { transform: scale(1.2); box-shadow: 0 0 15px #10b981; } 100% { transform: scale(1); box-shadow: 0 0 5px #10b981; } }
+                @keyframes wave-bounce { 0%, 100% { height: 8px; } 50% { height: 32px; } }
+                @keyframes wave-listen { 0%, 100% { height: 12px; } 50% { height: 20px; } }
+
+                /* Audio Visualizer */
+                .wave-bar { height: 8px; transition: background 0.5s ease; }
+                .wave-bar.speaking { animation: wave-bounce 1s infinite ease-in-out; }
+                .wave-bar.listening { animation: wave-listen 1.5s infinite ease-in-out; }
 
                 /* Parallax */
                 .parallax-wrapper { position: relative; width: 600px; height: 300px; display: flex; justify-content: center; align-items: center; transform-style: preserve-3d; transition: transform 0.1s ease-out; flex-shrink: 0; }

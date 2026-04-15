@@ -1,223 +1,260 @@
-// SpeechService.js — Clean rebuild
+// SpeechService.js
 console.log('[SPEECH] SpeechService.js loading...')
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition
 
 if (!SR) {
-  console.error('[SPEECH] ❌ SpeechRecognition not supported — use Chrome or Edge')
+  console.error('[SPEECH] SpeechRecognition not supported - use Chrome or Edge')
 } else {
-  console.log('[SPEECH] ✅ SpeechRecognition is available')
+  console.log('[SPEECH] SpeechRecognition is available')
 }
 
 window.SpeechService = {
   recognition: null,
-  manuallyStopped: false,
   isListening: false,
+  isSpeaking: false,
+  manuallyStopped: false,
+  _wasNoSpeech: false,
   connectingTimeout: null,
-  
-  // Stability Trackers
-  _restartCount: 0,
-  _lastRestartTime: 0,
   _lastStartedTime: Date.now(),
-  
-  hardwareReset: function() {
-    console.log('[SPEECH] 🔄 Performing HARDWARE RESET on Web Speech API...')
-    if (this.recognition) {
-        try { this.recognition.abort(); } catch(e) {}
-        this.recognition = null;
-    }
-    this.isListening = false;
-    window.micStatus = 'failed';
-    if (window.setMicStatus) window.setMicStatus('failed');
-    if (!this.manuallyStopped) {
-        setTimeout(() => this.start(), 1000);
-    }
-  },
+  _onResult: null,
+  _onListenChange: null,
+  _onInterim: null,
+  lastSpeechEnd: 0,
 
-  init: function() {
+  // Called ONCE on app boot with callback wiring
+  init: function(onResult, onListenChange, onInterim) {
     console.log('[SPEECH] init() called')
     if (!SR) return false
-    
-    // Always create a fresh recognition object
+
+    if (onResult) this._onResult = onResult
+    if (onListenChange) this._onListenChange = onListenChange
+    if (onInterim) this._onInterim = onInterim
+
     if (this.recognition) {
-        try { this.recognition.abort(); } catch(e) {}
-        this.recognition = null;
+      console.log('[SPEECH] Recognition already exists, reusing')
+      return true
     }
 
-    this.recognition = new SR()
-    this.recognition.continuous = true
-    this.recognition.interimResults = false
-    this.recognition.maxAlternatives = 3
-    this.recognition.lang = 'en-US'
+    this._createRecognition()
+    return true
+  },
 
-    this.recognition.onstart = () => {
-      clearTimeout(this.connectingTimeout);
-      console.log('[SPEECH] ✅ MICROPHONE IS NOW ACTIVE')
+  _createRecognition: function() {
+    if (this.recognition) {
+      try { this.recognition.abort() } catch(e) {}
+    }
+
+    const r = new SR()
+    r.continuous = true
+    r.interimResults = true
+    r.maxAlternatives = 3
+    r.lang = 'en-US'
+
+    r.onstart = () => {
+      clearTimeout(this.connectingTimeout)
       this.isListening = true
       this._lastStartedTime = Date.now()
       window.micStatus = 'listening'
       if (window.setMicActive) window.setMicActive(true)
       if (window.setMicStatus) window.setMicStatus('listening')
-      this._restartCount = 0 // Reset on successful start
+      if (this._onListenChange) this._onListenChange(true)
+      console.log('[SPEECH] Mic ACTIVE')
     }
 
-    this.recognition.onresult = (event) => {
-      const last = event.results.length - 1
-      const transcript = event.results[last][0].transcript.trim()
-      const confidence = event.results[last][0].confidence
-      
-      // Filter by confidence, especially when music is playing
-      const minConfidence = window.isMusicPlaying ? 0.7 : 0.5
-      console.log('[SPEECH] ✅ Heard:', transcript, '| Confidence:', confidence, '| Threshold:', minConfidence)
-      
-      if (confidence >= minConfidence) {
-          console.log('[SPEECH→APP] Sending to handleSpeechResult:', transcript)
-          if (window.handleSpeechResult) {
-              window.handleSpeechResult(transcript, confidence)
+    r.onresult = (event) => {
+      // Discard anything heard while AURA is speaking or shortly after to prevent acoustic feedback echoing
+      if (this.isSpeaking || (Date.now() - this.lastSpeechEnd < 2500)) return
+
+      let interim = ''
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          const transcript = event.results[i][0].transcript.trim()
+          const confidence = event.results[i][0].confidence
+          const minConf = window.isMusicPlaying ? 0.7 : 0.6
+          console.log('[SPEECH] Heard:', transcript, '| conf:', confidence.toFixed(2), '| min:', minConf)
+          if (confidence >= minConf) {
+            if (window.handleSpeechResult) window.handleSpeechResult(transcript, confidence)
+            else if (this._onResult) this._onResult(transcript, confidence)
+          } else {
+            console.warn('[SPEECH] Below confidence threshold - ignored')
           }
-      } else {
-          console.warn('[SPEECH] ⚠️ Low confidence result ignored (Music Playing:', !!window.isMusicPlaying, ')')
+        } else {
+          interim += event.results[i][0].transcript
+        }
       }
+      if (interim && this._onInterim) this._onInterim(interim)
     }
 
-    this.recognition.onend = () => {
+    // Chrome fires onend after every silence period (no-speech) or real stops.
+    // Only update UI state when it is a real unexpected end, not a silent timeout.
+    r.onend = () => {
       this.isListening = false
+      const silentRestart = this._wasNoSpeech
+      this._wasNoSpeech = false
+      if (!silentRestart && this._onListenChange) this._onListenChange(false)
       if (!this.manuallyStopped) {
-        console.log('[SPEECH] Recognition ended unexpectedly, restarting...')
-        setTimeout(() => {
-          this.start()
-        }, 300)
+        setTimeout(() => this._startRecognition(), 50)
       }
     }
 
-    this.recognition.onerror = (e) => {
-      clearTimeout(this.connectingTimeout);
-      console.error('[SPEECH] ❌ Error:', e.error)
+    r.onerror = (e) => {
+      clearTimeout(this.connectingTimeout)
       this.isListening = false
-      window.micStatus = 'failed'
-      if (window.setMicActive) window.setMicActive(false)
-      if (window.setMicStatus) window.setMicStatus('failed')
+      console.error('[SPEECH] Error:', e.error)
 
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-        console.error('[SPEECH] ❌ Permission or Service denied — cannot restart automatically')
+        this.manuallyStopped = true
+        window.micStatus = 'failed'
+        if (window.setMicActive) window.setMicActive(false)
+        if (window.setMicStatus) window.setMicStatus('failed')
+        if (this._onListenChange) this._onListenChange(false)
         if (window.showMicInstructions) window.showMicInstructions()
-        this.manuallyStopped = true // Stop attempts to restart
         return
+      }
+
+      if (e.error === 'aborted') {
+        return // Our own abort call - safe to ignore
+      }
+
+      if (e.error === 'no-speech') {
+        // Chrome silence timeout - DO NOT flip UI to offline. Restart quietly.
+        this._wasNoSpeech = true
+        return // onend fires next and restarts
       }
 
       if (e.error === 'network') {
-        console.warn('[SPEECH] ⚠️ Network error — retrying in 5s')
-        setTimeout(() => this.start(), 5000)
+        window.micStatus = 'failed'
+        if (window.setMicActive) window.setMicActive(false)
+        if (window.setMicStatus) window.setMicStatus('failed')
+        if (this._onListenChange) this._onListenChange(false)
+        setTimeout(() => this._startRecognition(), 5000)
         return
       }
-      
-      if (!this.manuallyStopped) {
-        setTimeout(() => this.start(), 2000)
-      }
-    }
 
-    return true
-  },
-
-  start: function() {
-    console.log('[SPEECH] start() called, isListening:', this.isListening)
-    
-    if (this.isListening) {
-      console.log('[SPEECH] Already listening, skipping start')
-      return
-    }
-
-    // Always re-init for clean slate on start
-    const ok = this.init()
-    if (!ok) return
-
-    this.manuallyStopped = false
-    
-    // Fix 2: Stuck Connecting Timeout
-    clearTimeout(this.connectingTimeout);
-    this.connectingTimeout = setTimeout(() => {
-        if (!this.isListening) {
-            console.warn('[SPEECH] ⚠️ Connecting timeout — recognition never fired onstart')
-            this.hardwareReset()
-        }
-    }, 5000)
-
-    try {
-      this.recognition.start()
-      console.log('[SPEECH] recognition.start() called')
-    } catch(e) {
-      console.error('[SPEECH] ❌ start() failed:', e.message)
-      setTimeout(() => this.start(), 2000)
-    }
-  },
-  
-  stop: function() {
-      clearTimeout(this.connectingTimeout);
-      this.manuallyStopped = true;
-      if (this.recognition) {
-          try { this.recognition.stop(); } catch(e) {}
-      }
-      this.isListening = false
+      // All other hard errors
       window.micStatus = 'failed'
       if (window.setMicActive) window.setMicActive(false)
       if (window.setMicStatus) window.setMicStatus('failed')
+      if (this._onListenChange) this._onListenChange(false)
+      if (!this.manuallyStopped) {
+        setTimeout(() => this._startRecognition(), 1500)
+      }
+    }
+
+    this.recognition = r
   },
-  
+
+  // Internal start - does NOT recreate the recognition object
+  _startRecognition: function() {
+    if (this.isListening || this.manuallyStopped) return
+
+    clearTimeout(this.connectingTimeout)
+    this.connectingTimeout = setTimeout(() => {
+      if (!this.isListening) {
+        console.warn('[SPEECH] Stuck connecting - hard resetting')
+        this._createRecognition()
+        this._startRecognition()
+      }
+    }, 6000)
+
+    try {
+      this.recognition.start()
+    } catch(e) {
+      if (e.message && e.message.includes('already started')) {
+        this.isListening = true
+      } else {
+        console.error('[SPEECH] start() threw:', e.message)
+        setTimeout(() => this._startRecognition(), 1500)
+      }
+    }
+  },
+
+  // Public start - called from App.jsx
+  start: function() {
+    this.manuallyStopped = false
+    if (!this.recognition) this._createRecognition()
+    this._startRecognition()
+  },
+
+  // Only for deliberate user stop (logout etc)
+  stop: function() {
+    clearTimeout(this.connectingTimeout)
+    this.manuallyStopped = true
+    if (this.recognition) {
+      try { this.recognition.stop() } catch(e) {}
+    }
+    this.isListening = false
+    window.micStatus = 'failed'
+    if (window.setMicActive) window.setMicActive(false)
+    if (window.setMicStatus) window.setMicStatus('failed')
+  },
+
+  // Toggle self-capture guard when AURA is speaking
+  setSpeaking: function(val) {
+    this.isSpeaking = val
+    if (!val) this.lastSpeechEnd = Date.now()
+  },
+
   speak: function(text, onEnd) {
-      if (onEnd) onEnd();
+    window.speechSynthesis.cancel()
+    this.setSpeaking(true)
+
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.rate = 0.92
+    utterance.pitch = 1.15
+    utterance.volume = 1.0
+
+    const pickVoice = () => {
+      const voices = window.speechSynthesis.getVoices()
+      const preferred = [
+        'Google UK English Female',
+        'Microsoft Zira - English (United States)',
+        'Samantha', 'Victoria', 'Karen'
+      ]
+      for (const name of preferred) {
+        const v = voices.find(v => v.name === name)
+        if (v) return v
+      }
+      const female = voices.find(v => v.name.toLowerCase().includes('female') && v.lang.startsWith('en'))
+      if (female) return female
+      return voices.find(v => v.lang === 'en-US' || v.lang === 'en-GB') || voices[0]
+    }
+
+    const doSpeak = () => {
+      utterance.voice = pickVoice()
+      utterance.onend = () => { this.setSpeaking(false); if (onEnd) onEnd() }
+      utterance.onerror = () => { this.setSpeaking(false); if (onEnd) onEnd() }
+      window.speechSynthesis.speak(utterance)
+    }
+
+    const voices = window.speechSynthesis.getVoices()
+    if (voices.length > 0) {
+      doSpeak()
+    } else {
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.onvoiceschanged = null
+        doSpeak()
+      }
+    }
   }
 }
 
-// Health check watchdog check every 15s to be less aggressive than the start() loop
+// Watchdog: only restart if mic has been dead for over 20 seconds
 setInterval(() => {
-    if (!window.SpeechService.isListening && !window.SpeechService.manuallyStopped && window.micStatus !== 'reconnecting') {
-        console.warn('[SPEECH] ⚠️ Health check: Inactive. Restarting...')
-        window.SpeechService.start()
+  if (!window.SpeechService.manuallyStopped &&
+      !window.SpeechService.isListening &&
+      !window.SpeechService.isSpeaking) {
+    const dead = Date.now() - window.SpeechService._lastStartedTime
+    if (dead > 20000) {
+      console.warn('[SPEECH] Watchdog: mic dead >20s, restarting...')
+      window.SpeechService._startRecognition()
     }
-    
-    // Hard reset every 15 minutes to prevent Chrome Web Speech API stalling
-    if (window.SpeechService.isListening && (Date.now() - window.SpeechService._lastStartedTime > 900000)) {
-        console.log('[SPEECH] ⏱️ 15-minute stability reset triggered.')
-        window.SpeechService.hardwareReset()
-    }
-}, 15000)
+  }
+}, 20000)
 
 window.showMicInstructions = () => {
-  document.body.insertAdjacentHTML('beforeend', `
-    <div style="
-      position:fixed; top:0; left:0; right:0; 
-      background:rgba(30, 58, 95, 0.95); color:white; 
-      padding:20px; text-align:center; 
-      font-family:monospace; z-index:9999;
-      font-size:13px; line-height:2;
-      backdrop-filter: blur(10px);
-    ">
-      <strong style="color:#22d3ee; font-size:16px">
-        ⚠ One-time Chrome setup required for voice
-      </strong><br/>
-      1. Open a new tab and go to: 
-      <code style="background:#0f172a; padding:4px 8px; border-radius:4px">
-        chrome://flags/#unsafely-treat-insecure-origin-as-secure
-      </code><br/>
-      2. Add <code style="background:#0f172a; padding:4px 8px; border-radius:4px">
-        http://127.0.0.1:8888
-      </code> to the text box and set to <strong>Enabled</strong><br/>
-      3. Click <strong>Relaunch Chrome</strong><br/>
-      4. Come back to AURA — voice will work permanently after this<br/>
-      <button onclick="window.open('chrome://flags/#unsafely-treat-insecure-origin-as-secure')" 
-        style="margin-top:8px; background:#0e7490; color:white; border:none; 
-        padding:10px 20px; border-radius:6px; cursor:pointer; font-size:14px">
-        Open Chrome Flags
-      </button>
-      <button onclick="this.parentElement.remove()" 
-        style="margin-top:8px; margin-left:8px; background:#374151; color:white; 
-        border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-size:14px">
-        Dismiss
-      </button>
-    </div>
-  `)
+  console.log('[SPEECH] Mic instructions theoretically shown, but suppressed to avoid pop-ups.')
 }
 
-// Auto start immediately
-console.log('[SPEECH] Auto starting SpeechService...')
-window.SpeechService.start()
+console.log('[SPEECH] SpeechService ready - App.jsx will call init() then start()')

@@ -11,8 +11,8 @@ const MOOD_KEYWORDS = {
   happy: ["happy", "joy", "great", "amazing", "good", "excited", "cheerful", "wonderful", "fantastic", "awesome"],
   sad: ["sad", "depressed", "down", "cry", "crying", "upset", "unhappy", "lonely", "heartbroken", "miss"],
   calm: ["calm", "relax", "chill", "peaceful", "quiet", "breathe", "slow", "easy", "zen", "rest"],
-  focused: ["focus", "study", "concentrate", "work", "productive", "homework", "exam", "coding", "read"],
-  energetic: ["energy", "pump", "hype", "workout", "gym", "run", "dance", "party", "fired up", "lets go"],
+  focused: ["focused", "focus", "study", "concentrate", "work", "productive", "homework", "exam", "coding", "read"],
+  energetic: ["energetic", "energy", "pump", "pumped", "hype", "workout", "gym", "run", "dance", "party", "fired up", "lets go", "fire", "lit"],
   stressed: ["stressed", "stress", "anxious", "anxiety", "nervous", "overwhelmed", "pressure", "panic", "worried"],
   angry: ["angry", "mad", "furious", "annoyed", "frustrated", "hate", "irritated", "rage"],
   tired: ["tired", "sleepy", "exhausted", "drained", "bored", "lazy", "slow", "heavy"]
@@ -168,9 +168,9 @@ function predictWithModel(text) {
     
     // Confidence Threshold — explain why predictions below 0.6 are rejected and sent to next layer:
     // Categorical probability below 0.6 implies the decision boundary hyperplane is highly entangled and cannot cleanly separate the sequence's semantics. We suppress the output and default to a rigid heuristic rather than risk playing jarring genres.
-    if (confidence > 0.6) {
+    if (confidence > 0.8) {
       return { mood: dynamicMoodLabels[maxIndex], confidence: 'HIGH', method: 'deep_learning' }
-    } else if (confidence > 0.4) {
+    } else if (confidence > 0.6) {
       return { mood: dynamicMoodLabels[maxIndex], confidence: 'MEDIUM', method: 'deep_learning' }
     }
     return null

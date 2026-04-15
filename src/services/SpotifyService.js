@@ -59,6 +59,9 @@ window.SpotifyService = {
             if (data.access_token) {
                 this.accessToken = data.access_token;
                 localStorage.setItem('spotify_access_token', data.access_token);
+                if (data.refresh_token) {
+                    localStorage.setItem('spotify_refresh_token', data.refresh_token);
+                }
                 window.location.href = "http://127.0.0.1:8888/";
                 return { success: true };
             }
@@ -79,8 +82,35 @@ window.SpotifyService = {
     logout: function() {
         if (this.player) { this.player.disconnect(); this.player = null; }
         localStorage.removeItem('spotify_access_token');
+        localStorage.removeItem('spotify_refresh_token');
         localStorage.removeItem('code_verifier');
         this.accessToken = null; this.deviceId = null;
+    },
+
+    refreshToken: async function() {
+        const refreshToken = localStorage.getItem('spotify_refresh_token');
+        if (!refreshToken) return { success: false, error: 'No refresh token' };
+        
+        const body = new URLSearchParams({
+            grant_type: 'refresh_token', refresh_token: refreshToken, client_id: CLIENT_ID
+        });
+
+        try {
+            const response = await fetch('https://accounts.spotify.com/api/token', {
+                method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body
+            });
+            const data = await response.json();
+            if (data.access_token) {
+                this.accessToken = data.access_token;
+                localStorage.setItem('spotify_access_token', data.access_token);
+                if (data.refresh_token) {
+                    localStorage.setItem('spotify_refresh_token', data.refresh_token);
+                }
+                console.log('[SPOTIFY] Token refreshed successfully in background.');
+                return { success: true };
+            }
+            return { success: false, error: "Refresh denied." };
+        } catch (e) { return { success: false, error: e.message }; }
     },
 
     initPlayer: function(onReady, onStateChange) {
@@ -165,6 +195,11 @@ window.SpotifyService = {
                 console.error('[SPOTIFY] ❌ player.resume() failed:', e);
                 if (window.setStatusText) window.setStatusText('Click anywhere to start music');
             }); 
+        }
+    },
+    setVolume: async function(vol) {
+        if (this.player) {
+            try { await this.player.setVolume(vol); } catch (e) { console.error('[SPOTIFY] setVolume err:', e); }
         }
     },
     getPosition: async function() {
