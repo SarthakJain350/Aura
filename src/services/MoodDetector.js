@@ -10,7 +10,7 @@
 const MOOD_KEYWORDS = {
   happy: ["happy", "joy", "great", "amazing", "good", "excited", "cheerful", "wonderful", "fantastic", "awesome"],
   sad: ["sad", "depressed", "down", "cry", "crying", "upset", "unhappy", "lonely", "heartbroken", "miss"],
-  calm: ["calm", "relax", "chill", "peaceful", "quiet", "breathe", "slow", "easy", "zen", "rest"],
+  calm: ["calm", "relax", "chill", "peaceful", "quiet", "breathe", "slow", "easy", "zen", "rest", "car", "come"],
   focused: ["focused", "focus", "study", "concentrate", "work", "productive", "homework", "exam", "coding", "read"],
   energetic: ["energetic", "energy", "pump", "pumped", "hype", "workout", "gym", "run", "dance", "party", "fired up", "lets go", "fire", "lit"],
   stressed: ["stressed", "stress", "anxious", "anxiety", "nervous", "overwhelmed", "pressure", "panic", "worried"],

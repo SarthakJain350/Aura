@@ -78,6 +78,9 @@ const FUZZY_INTENT_MAP = {
     // Language variants
     'indie': 'hindi', 'windy': 'hindi', 'indy': 'hindi',
     'english man': 'english', 'anglish': 'english',
+    // Mishearings of 'calm'
+    'come': 'calm', 'cum': 'calm', 'karma': 'calm', 'com': 'calm', 'column': 'calm', 'car': 'calm',
+    'play heart': 'play hard', 'play pop': 'play pop'
 }
 
 // Pre-processes a transcript — replaces known mishearings before intent routing
@@ -184,6 +187,8 @@ const App = () => {
     const handleSpeechCommandRef = useRef(null);
     const handleDirectCommandRef = useRef(null);
     const lastMoodChangeRef = useRef(0);
+    const commandBufferRef = useRef("");
+    const settleTimerRef = useRef(null);
 
     useEffect(() => { 
       listeningModeRef.current = listeningMode;
@@ -253,6 +258,9 @@ const App = () => {
     };
 
     const say = (text, onEnd) => {
+        if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+        commandBufferRef.current = "";
+
         if (isDND) {
             if (onEnd) onEnd();
             return;
@@ -283,7 +291,7 @@ const App = () => {
     };
 
     const handleDetectedMood = (detectedMood, forceDirect = false, forceGenre = null) => {
-        if (POSITIVE_COUNTERPARTS[detectedMood]) {
+        if (POSITIVE_COUNTERPARTS[detectedMood] && !forceDirect) {
             const counterPart = POSITIVE_COUNTERPARTS[detectedMood];
             const confirmData = { detectedMood, counterPart, requestedGenre: forceGenre };
             setPendingNegativeConfirmation(confirmData);
@@ -361,7 +369,7 @@ const App = () => {
     // Bug 1: Robust Timers
     useEffect(() => {
         if (listeningMode === 'active' || listeningMode === 'active_manual') {
-            setWakeTimeRemaining(listeningMode === 'active_manual' ? 10 : 5);
+            setWakeTimeRemaining(10);
             timeoutIntervalRef.current = setInterval(() => {
                 setWakeTimeRemaining(prev => {
                     if (prev <= 1) {
@@ -422,7 +430,8 @@ const App = () => {
                 // Fire empathy check only once — exactly when 2 full songs have played
                 if (nextCount === 2) {
                     setTimeout(() => {
-                        say(`Hey, just checking in. Are you feeling any better? Remember I'm here whenever you want to switch things up.`);
+                        // Call handleDetectedMood to trigger the actual visual empathy popup
+                        handleDetectedMood(moodRef.current);
                     }, 4000);
                     return 99; // Set to 99 so it never triggers again this session 
                 }
@@ -744,10 +753,31 @@ const App = () => {
         
         setInterimText(""); 
         const raw = transcript.toLowerCase().trim();
-        // Normalize mishearings before any processing
         const lower = normalizeSpeech(raw);
-        if (raw !== lower) console.log('[FUZZY] Normalized:', raw, '->', lower);
-        console.log('[APP<-SPEECH] Received:', lower, '| mode:', listeningModeRef.current);
+        console.log('[APP<-SPEECH] Final snippet:', lower, '| mode:', listeningModeRef.current);
+
+        // Clear any existing settle timer and add to buffer
+        if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+        commandBufferRef.current = (commandBufferRef.current + " " + lower).trim();
+
+        // If it's a very short command like " Aura", process immediately
+        const b = commandBufferRef.current;
+        if (b === 'aura' || b === 'aura aura') {
+           executeActualHandleSpeech(b, confidence);
+           return;
+        }
+
+        console.log('[ACTIVE] Settling command buffer:', b);
+        settleTimerRef.current = setTimeout(() => {
+           console.log('[ACTIVE] Settle complete — executing:', commandBufferRef.current);
+           const finalCommand = commandBufferRef.current;
+           commandBufferRef.current = "";
+           executeActualHandleSpeech(finalCommand, confidence);
+        }, 400);
+    };
+
+    const executeActualHandleSpeech = (lower, confidence) => {
+        console.log('[APP] executeActualHandleSpeech:', lower, '| mode:', listeningModeRef.current);
         
         const currentMode = listeningModeRef.current;
         const wakeTrigger = getWakeWordTrigger(lower);
@@ -789,15 +819,6 @@ const App = () => {
                 console.log('[WAKE] Simple wake detected');
                 setListeningMode('active');
                 say('Yes?');
-                
-                if (wakeTimeoutRef.current) clearTimeout(wakeTimeoutRef.current);
-                wakeTimeoutRef.current = setTimeout(() => {
-                    if (listeningModeRef.current === 'active') {
-                        console.log('[WAKE] Timeout — returning to passive');
-                        setListeningMode('passive');
-                        say('I did not catch that. Say Aura to try again.');
-                    }
-                }, 10000);
             }
             return;
         }
@@ -831,14 +852,18 @@ const App = () => {
                 say('Do not disturb disabled.'); return;
             }
 
-            // Direct playback keywords — no wake word needed
-            if (['pause', 'stop', 'pause music', 'stop music', 'shut up', 'pause it', 'stop it'].includes(lower)) {
+            // Direct playback keywords — more robust matching
+            const skipWords = ['skip', 'next', 'next song', 'skip track', 'next track'];
+            const pauseWords = ['pause', 'stop', 'shut up', 'silence', 'pause music'];
+            const resumeWords = ['resume', 'play', 'unpause', 'resume music'];
+
+            if (skipWords.some(k => lower.includes(k))) {
+                handleSkip(); return;
+            }
+            if (pauseWords.some(k => lower.includes(k))) {
                 window.SpotifyService.pause(); say('Pausing.'); return;
             }
-            if (['skip', 'next', 'skip song', 'next song', 'skip it', 'next track'].includes(lower)) {
-                window.SpotifyService.nextSong(); say('Skipping.'); return;
-            }
-            if (['resume', 'play', 'unpause', 'resume music', 'play music'].includes(lower)) {
+            if (resumeWords.some(k => lower.includes(k))) {
                 window.SpotifyService.resume(); say('Resuming.'); return;
             }
 
@@ -912,19 +937,18 @@ function setActiveMood(mood) { setMood(mood); }
 
     const handleSkip = () => {
         const now = Date.now();
-        if (now - lastSkipTimeRef.current > 10 * 60 * 1000) {
+        if (now - lastSkipTimeRef.current > 15 * 60 * 1000) {
             skipCountRef.current = 0;
         }
         skipCountRef.current += 1;
         lastSkipTimeRef.current = now;
 
         const skips = window.ProfileService.onSkip('current_track_proxy');
-        if (skips >= 3) {
+        if (skips >= 5) {
             // BUG FIX: Use genreRef.current — activeGenre is a stale closure inside handleSkip
             const currentGenre = genreRef.current || activeGenre || 'mix';
             const gr = window.ProfileService.getGenreRotation();
             const currentIdx = gr.indexOf(currentGenre);
-            // If current genre not in rotation list, start from index 0; otherwise go to next
             const nextGenreIdx = currentIdx < 0 ? 0 : (currentIdx + 1) % gr.length;
             const newGenre = gr[nextGenreIdx];
             
@@ -932,16 +956,14 @@ function setActiveMood(mood) { setMood(mood); }
             if (newGenre !== activeGenre) genreStartTimeRef.current = Date.now();
             setActiveGenre(newGenre);
             genreRef.current = newGenre;
-            if (!isDND) {
-                setToastMsg(`Switching genre to ${newGenre}`);
-                setTimeout(() => setToastMsg(''), 3000);
-            }
-            addLog(`3-skip fallback: ${currentGenre} -> ${newGenre}`, "system", "HIGH");
-            say(`You have skipped 3 songs. Let me switch to ${newGenre} for you.`);
-            window.SpotifyService.playMood(moodRef.current, newGenre, langRef.current);
+            
+            addLog(`5-skip rotation: ${currentGenre} -> ${newGenre}`, "system", "HIGH");
+            say(`Let's try some ${newGenre} music instead.`, () => {
+                window.SpotifyService.playMood(moodRef.current, newGenre, langRef.current);
+            });
         } else {
             window.SpotifyService.nextSong();
-            say("Got it, skipping.");
+            say("Skipping.");
         }
     };
 

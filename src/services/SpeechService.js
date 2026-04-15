@@ -17,6 +17,7 @@ window.SpeechService = {
   _wasNoSpeech: false,
   connectingTimeout: null,
   _lastStartedTime: Date.now(),
+  _lastActivityTime: Date.now(),
   _onResult: null,
   _onListenChange: null,
   _onInterim: null,
@@ -63,15 +64,16 @@ window.SpeechService = {
     }
 
     r.onresult = (event) => {
+      this._lastActivityTime = Date.now()
       // Discard anything heard while AURA is speaking or shortly after to prevent acoustic feedback echoing
-      if (this.isSpeaking || (Date.now() - this.lastSpeechEnd < 2500)) return
+      if (this.isSpeaking || (Date.now() - this.lastSpeechEnd < 700)) return
 
       let interim = ''
       for (let i = event.resultIndex; i < event.results.length; i++) {
         if (event.results[i].isFinal) {
           const transcript = event.results[i][0].transcript.trim()
           const confidence = event.results[i][0].confidence
-          const minConf = window.isMusicPlaying ? 0.7 : 0.6
+          const minConf = window.isMusicPlaying ? 0.5 : 0.4
           console.log('[SPEECH] Heard:', transcript, '| conf:', confidence.toFixed(2), '| min:', minConf)
           if (confidence >= minConf) {
             if (window.handleSpeechResult) window.handleSpeechResult(transcript, confidence)
@@ -83,7 +85,10 @@ window.SpeechService = {
           interim += event.results[i][0].transcript
         }
       }
-      if (interim && this._onInterim) this._onInterim(interim)
+      if (interim) {
+        this._lastActivityTime = Date.now()
+        if (this._onInterim) this._onInterim(interim)
+      }
     }
 
     // Chrome fires onend after every silence period (no-speech) or real stops.
@@ -198,6 +203,7 @@ window.SpeechService = {
 
   speak: function(text, onEnd) {
     window.speechSynthesis.cancel()
+    if (this.speakTimeout) clearTimeout(this.speakTimeout);
     this.setSpeaking(true)
 
     const utterance = new SpeechSynthesisUtterance(text)
@@ -221,10 +227,20 @@ window.SpeechService = {
       return voices.find(v => v.lang === 'en-US' || v.lang === 'en-GB') || voices[0]
     }
 
+    const maxTime = text.length * 100 + 4000;
+    this.speakTimeout = setTimeout(() => {
+      if (this.isSpeaking) {
+        console.warn('[SPEECH] Fallback: utterance.onend did not fire. Releasing lock.');
+        this.setSpeaking(false);
+        if (onEnd) onEnd();
+      }
+    }, maxTime);
+
     const doSpeak = () => {
       utterance.voice = pickVoice()
-      utterance.onend = () => { this.setSpeaking(false); if (onEnd) onEnd() }
-      utterance.onerror = () => { this.setSpeaking(false); if (onEnd) onEnd() }
+
+      utterance.onend = () => { clearTimeout(this.speakTimeout); this.setSpeaking(false); if (onEnd) onEnd() }
+      utterance.onerror = () => { clearTimeout(this.speakTimeout); this.setSpeaking(false); if (onEnd) onEnd() }
       window.speechSynthesis.speak(utterance)
     }
 
@@ -240,18 +256,27 @@ window.SpeechService = {
   }
 }
 
-// Watchdog: only restart if mic has been dead for over 20 seconds
+// Watchdog: restart if mic has been dead or silent for too long
 setInterval(() => {
-  if (!window.SpeechService.manuallyStopped &&
-      !window.SpeechService.isListening &&
-      !window.SpeechService.isSpeaking) {
-    const dead = Date.now() - window.SpeechService._lastStartedTime
-    if (dead > 20000) {
-      console.warn('[SPEECH] Watchdog: mic dead >20s, restarting...')
+  if (window.SpeechService.manuallyStopped) return
+
+  const now = Date.now()
+  const lastStart = now - window.SpeechService._lastStartedTime
+  const lastActivity = now - window.SpeechService._lastActivityTime
+
+  if (!window.SpeechService.isListening && !window.SpeechService.isSpeaking) {
+    if (lastStart > 10000) {
+      console.warn('[SPEECH] Watchdog: mic dead >10s, restarting...')
+      window.SpeechService._startRecognition()
+    }
+  } else if (window.SpeechService.isListening && !window.SpeechService.isSpeaking) {
+    if (lastActivity > 30000) {
+      console.warn('[SPEECH] Watchdog: mic responsive but silent >30s, cycling...')
+      window.SpeechService._createRecognition()
       window.SpeechService._startRecognition()
     }
   }
-}, 20000)
+}, 5000)
 
 window.showMicInstructions = () => {
   console.log('[SPEECH] Mic instructions theoretically shown, but suppressed to avoid pop-ups.')
